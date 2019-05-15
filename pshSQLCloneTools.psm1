@@ -28,6 +28,7 @@
 #>
 
 Function Set-Database {
+    [cmdletbinding()]
     param(
         [Parameter(Mandatory)]
         [string]$DatabaseName,
@@ -41,34 +42,31 @@ Function Set-Database {
 
         "Online" {
             $SQLAction = "ONLINE"
-            $SQLCMD = @"
-USE master;
-GO
-
-ALTER DATABASE [$DatabaseName] SET $SQLAction
-"@ 
-            Invoke-Sqlcmd $SQLCMD -QueryTimeout 3600 -ServerInstance .
         }
         "Offline" {
             $SQLAction = "OFFLINE WITH ROLLBACK IMMEDIATE"
-            $SQLCMD = @"
+        }
+    }
+    $SQLCMD = @"
+    
 USE master;
 GO
 
 ALTER DATABASE [$DatabaseName] SET $SQLAction
 "@  
-        }
-    }
+    Invoke-Sqlcmd $SQLCMD -QueryTimeout 3600 -ServerInstance .
+    
     $retval = Invoke-Sqlcmd -Query "select state_desc as IsOnline from sys.databases where name = '$DatabaseName';"
     If ($retval.IsOnline -eq "ONLINE") {
-        Write-Host "[$DatabaseName] is ONLINE"
+        Write-Verbose "[$DatabaseName] is ONLINE"
     }
     else {
-        Write-Host "[$DatabaseName] is OFFLINE"
+        Write-Verbose "[$DatabaseName] is OFFLINE"
     }
 }
 
-Function Create-DatabaseImage {
+Function New-DatabaseImage {
+    [cmdletbinding()]
     param(
         [Parameter(Mandatory)]
         [string]$DatabaseName,
@@ -84,28 +82,28 @@ Function Create-DatabaseImage {
     $BackupFile = (Join-path $BaseDirectory ("\$NewDatabaseName\Backup\" + $NewDatabaseName + '.bak'))
 
     #Making directory structure for cloning
-    $garbage = New-Item -ItemType directory -Path $VHDMountPath -ErrorAction SilentlyContinue | Out-Null
-    $garbage = New-Item -ItemType directory -Path $BackupDir -ErrorAction SilentlyContinue | Out-Null
+    New-Item -ItemType directory -Path $VHDMountPath -ErrorAction SilentlyContinue | Out-Null
+    New-Item -ItemType directory -Path $BackupDir -ErrorAction SilentlyContinue | Out-Null
 
 
     #Creating VHD file for mounting
-    Write-Host "Command [New-VHD] is executing [$VHDFile]."
-    $garbage = New-VHD -Dynamic -Path $VHDFile -SizeBytes 2040GB
+    Write-Verbose "Command [New-VHD] is executing [$VHDFile]."
+    New-VHD -Dynamic -Path $VHDFile -SizeBytes 2040GB
 
     #Mounting VHD file to a predetermined location
-    Write-Host "Command [Mount-VHD] is executing [$VHDFile]."
-    $garbage = Mount-VHD -Path $VHDFile
+    Write-Verbose "Command [Mount-VHD] is executing [$VHDFile]."
+    Mount-VHD -Path $VHDFile
 
     #Initiaizing, partitioning, and formatting disk
-    Write-Host "Command [Initialize-Disk] is executing [$VHDFile]."
+    Write-Verbose "Command [Initialize-Disk] is executing [$VHDFile]."
     $Disk = Get-VHD -Path $VHDFile 
     $Disk | Initialize-Disk -PartitionStyle MBR | Out-Null
-    Write-Host "Command [New-Partition] is executing [$VHDFile]."
+    Write-Verbose "Command [New-Partition] is executing [$VHDFile]."
     $Disk | New-Partition -UseMaximumSize | Out-Null
     $Partition = Get-Partition -DiskNumber $Disk.Number
-    Write-Host "Command [Format-Volume] is executing [$VHDFile]."
+    Write-Verbose "Command [Format-Volume] is executing [$VHDFile]."
     $Partition | Format-Volume -FileSystem NTFS -Confirm:$false | Out-Null
-    Write-Host "Command [Add-PartitionAccessPath] is executing [$VHDFile]."
+    Write-Verbose "Command [Add-PartitionAccessPath] is executing [$VHDFile]."
     $Partition | Add-PartitionAccessPath -AccessPath $VHDMountPath | Out-Null
 
     #Backing up target database and restoring to newly mounted vhd disk image
@@ -118,10 +116,11 @@ Function Create-DatabaseImage {
 
     #Detaching and dismounting database and then disk image
     Detach-Database -DatabaseName $NewDatabaseName -ErrorAction SilentlyContinue
-    Write-Host "Command [Dismount-VHD] is executing [$VHDFile]."
+    Write-Verbose "Command [Dismount-VHD] is executing [$VHDFile]."
     Dismount-VHD -Path $VHDFile -ErrorAction SilentlyContinue
 }
-Function Delete-DatabaseImage {
+Function Remove-DatabaseImage {
+    [cmdletbinding()]
     param(
         [Parameter(Mandatory)]
         [string]$BaseDirectory,
@@ -134,13 +133,14 @@ Function Delete-DatabaseImage {
 
     #Detaching and dismounting database and then disk image
     Detach-Database -DatabaseName $NewDatabaseName -ErrorAction SilentlyContinue
-    Write-Host "Command [Dismount-VHD] is executing [$VHDFile]."
+    Write-Verbose "Command [Dismount-VHD] is executing [$VHDFile]."
     Dismount-VHD -Path $VHDFile -ErrorAction SilentlyContinue
 
     #Cleanup of directories after clone process
     Remove-Directory -Path $CloneDir
 }
-Function Delete-DatabaseClone {
+Function Remove-DatabaseClone {
+    [cmdletbinding()]
     param(
         [Parameter(Mandatory)]
         [string]$CloneDatabaseName,
@@ -156,14 +156,15 @@ Function Delete-DatabaseClone {
     #Detaching and dismounting database and then disk image
     Detach-Database -DatabaseName $CloneDatabaseName -ErrorAction SilentlyContinue
     Delete-Database -DatabaseName $CloneDatabaseName -ErrorAction SilentlyContinue
-    Write-Host "Command [Dismount-VHD] is executing [$VHDFile]."
+    Write-Verbose "Command [Dismount-VHD] is executing [$VHDFile]."
     Dismount-VHD -Path $VHDFile -ErrorAction SilentlyContinue
 
     #Cleanup of directories after clone process
     Remove-Item -path $VHDFile -ErrorAction SilentlyContinue
     Remove-Directory -path $CloneDir -ErrorAction SilentlyContinue
 }
-Function Create-DatabaseClone {
+Function New-DatabaseClone {
+    [cmdletbinding()]
     param(
         [Parameter(Mandatory)]
         [string]$CloneDatabaseName,
@@ -176,29 +177,29 @@ Function Create-DatabaseClone {
     $VHDCloneMountPath = (Join-path $BaseDirectory ("\$NewDatabaseName\$CloneDatabaseName\Mount\"))
     $ChildVHDFile = (Join-path $BaseDirectory ("\$NewDatabaseName\VHD\" + $CloneDatabaseName + '.vhdx'))
 
-    Write-Host "Command [New-VHD] is executing [$ChildVHDFile] as Child Disk."
-    $garbage = New-VHD -ParentPath $VHDFile -Path $ChildVHDFile -Differencing
+    Write-Verbose "Command [New-VHD] is executing [$ChildVHDFile] as Child Disk."
+    New-VHD -ParentPath $VHDFile -Path $ChildVHDFile -Differencing
 
-    Write-Host "Command [Mount-VHD] is executing [$ChildVHDFile]."
+    Write-Verbose "Command [Mount-VHD] is executing [$ChildVHDFile]."
     Mount-VHD -Path $ChildVHDFile
 
-    Write-Host "Command [Set-Disk] is executing [$ChildVHDFile]."
+    Write-Verbose "Command [Set-Disk] is executing [$ChildVHDFile]."
     get-disk | set-disk -isOffline $false
     Start-Sleep -Seconds 2
     $Disk = Get-VHD -Path $ChildVHDFile 
 
-    Write-Host "Command [Get-Partition] is executing [$ChildVHDFile]."
+    Write-Verbose "Command [Get-Partition] is executing [$ChildVHDFile]."
     $Partition = Get-Partition -DiskNumber $Disk.Number
     #Making directory structure for cloning
-    $garbage = New-Item -ItemType directory -Path $VHDCloneMountPath -ErrorAction SilentlyContinue | Out-Null
+    New-Item -ItemType directory -Path $VHDCloneMountPath -ErrorAction SilentlyContinue | Out-Null
 
-    Write-Host "Command [Remove-PartitionAccessPath] is executing [$ChildVHDFile]."
+    Write-Verbose "Command [Remove-PartitionAccessPath] is executing [$ChildVHDFile]."
     $drive1 = $Partition.DriveLetter + ":\"
-    $garbage = Remove-PartitionAccessPath -AccessPath $drive1 -DiskNumber $Disk.DiskNumber -PartitionNumber $Partition.PartitionNumber -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "Command [Add-PartitionAccessPath] is executing [$ChildVHDFile]."
+    Remove-PartitionAccessPath -AccessPath $drive1 -DiskNumber $Disk.DiskNumber -PartitionNumber $Partition.PartitionNumber -ErrorAction SilentlyContinue | Out-Null
+    Write-Verbose "Command [Add-PartitionAccessPath] is executing [$ChildVHDFile]."
     $Partition | Add-PartitionAccessPath -AccessPath $VHDCloneMountPath | Out-null
 
-    $files = (Get-ChildItem -Path $VHDCloneMountPath -file | % { [PSCustomObject]@{Name = $_.Name } })  
+    $files = (Get-ChildItem -Path $VHDCloneMountPath -file | ForEach-Object { [PSCustomObject]@{Name = $_.Name } })  
 
     $b = @()
     foreach ($file in $files) {
